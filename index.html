@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>MindAR MP4動画再生</title>
+
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: sans-serif;
+      touch-action: none;
+    }
+
+    a-scene {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #info {
+      position: fixed;
+      z-index: 9999;
+      top: 12px;
+      left: 12px;
+      max-width: calc(100vw - 150px);
+      padding: 10px 14px;
+      box-sizing: border-box;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    #status {
+      color: #ffd700;
+      font-weight: bold;
+    }
+
+    .success {
+      color: #51cf66 !important;
+    }
+
+    .error {
+      color: #ff6b6b !important;
+    }
+
+    #loading {
+      position: fixed;
+      z-index: 10000;
+      top: 12px;
+      right: 12px;
+      max-width: 42vw;
+      padding: 10px 12px;
+      box-sizing: border-box;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #ffd700;
+      font-size: 12px;
+      text-align: right;
+      pointer-events: none;
+    }
+
+    #startButton {
+      display: block;
+      position: fixed;
+      z-index: 10001;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      padding: 14px 22px;
+      border: 0;
+      border-radius: 10px;
+      background: #1465cc;
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      white-space: nowrap;
+      touch-action: manipulation;
+    }
+
+    #startButton:disabled {
+      opacity: 0.75;
+    }
+  </style>
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+</head>
+
+<body>
+  <div id="info">
+    <div>状態：<span id="status">準備中...</span></div>
+    <div style="margin-top: 4px; color: #aaa; font-size: 10px;">
+      動画は画面中央に固定。2本指で拡大縮小できます。
+    </div>
+  </div>
+
+  <div id="loading">動画の読み込み準備中...</div>
+  <button id="startButton" type="button">タップして動画を開始</button>
+
+  <a-scene
+    mindar-image="
+      imageTargetSrc: ./targets.mind;
+      filterMinCF: 0.0005;
+      filterBeta: 1000;
+      warmupTolerance: 5;
+      missTolerance: 15;
+    "
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <a-assets>
+      <video
+        id="vid"
+        src="./video.mp4"
+        preload="auto"
+        loop
+        muted
+        playsinline
+        webkit-playsinline>
+      </video>
+    </a-assets>
+
+    <a-camera position="0 0 0" look-controls="enabled: false">
+      <a-video
+        id="videoPlane"
+        src="#vid"
+        position="0 0 -1.8"
+        width="1.1"
+        height="0.61875"
+        scale="1 1 1"
+        visible="false">
+      </a-video>
+    </a-camera>
+
+    <a-entity
+      id="targetEntity"
+      mindar-image-target="targetIndex: 0">
+    </a-entity>
+  </a-scene>
+
+  <script>
+    const sceneEl = document.querySelector('a-scene');
+    const statusEl = document.getElementById('status');
+    const loadingEl = document.getElementById('loading');
+    const startButton = document.getElementById('startButton');
+    const targetEntity = document.getElementById('targetEntity');
+    const videoEl = document.getElementById('vid');
+    const videoPlane = document.getElementById('videoPlane');
+
+    let hasSeenMarker = false;
+    let isMarkerVisible = false;
+    let hasPlayed = false;
+
+    function setStatus(message, type = '') {
+      statusEl.textContent = message;
+      statusEl.className = type;
+    }
+
+    function showVideoIfReady() {
+      if (hasSeenMarker && hasPlayed && !videoEl.paused) {
+        videoPlane.setAttribute('visible', true);
+      }
+    }
+
+    sceneEl.addEventListener('arReady', () => {
+      setStatus('カメラ起動成功。動画を開始してマーカーをかざしてください');
+    });
+
+    sceneEl.addEventListener('arError', (event) => {
+      console.error('MindAR起動エラー:', event);
+      setStatus('ARを起動できません。カメラ権限とtargets.mindを確認してください', 'error');
+    });
+
+    // ボタンのタップ中にplay()を呼び、スマートフォンの再生制限に対応する
+    startButton.addEventListener('click', () => {
+      videoEl.muted = true;
+      startButton.disabled = true;
+      startButton.textContent = '動画を読み込み・再生中...';
+      loadingEl.textContent = 'MP4読み込み中...';
+
+      let playPromise;
+
+      try {
+        // MP4を丸ごとfetchしてから再生するのではなく、ブラウザに直接再生させる
+        playPromise = videoEl.play();
+      } catch (error) {
+        handlePlayError(error);
+        return;
+      }
+
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            hasPlayed = true;
+            showVideoIfReady();
+          })
+          .catch(handlePlayError);
+      }
+    });
+
+    function handlePlayError(error) {
+      console.error('動画再生エラー:', error);
+      startButton.disabled = false;
+      startButton.textContent = 'タップして動画を再試行';
+      loadingEl.textContent = '動画を再生できません';
+
+      if (error && error.name === 'NotAllowedError') {
+        setStatus('再生が制限されました。下のボタンをもう一度押してください', 'error');
+      } else {
+        setStatus('video.mp4の配置・形式・通信状態を確認してください', 'error');
+      }
+    }
+
+    videoEl.addEventListener('canplay', () => {
+      loadingEl.textContent = '動画の再生準備ができました';
+    });
+
+    videoEl.addEventListener('playing', () => {
+      hasPlayed = true;
+      startButton.style.display = 'none';
+      loadingEl.textContent = '動画再生中';
+      showVideoIfReady();
+
+      if (isMarkerVisible) {
+        setStatus('マーカー認識中。動画を再生しています', 'success');
+      } else if (hasSeenMarker) {
+        setStatus('動画再生中。マーカーを見失っても表示は続きます', 'success');
+      } else {
+        setStatus('動画再生中。マーカーをかざしてください', 'success');
+      }
+    });
+
+    videoEl.addEventListener('pause', () => {
+      if (hasPlayed && !videoEl.ended) {
+        startButton.disabled = false;
+        startButton.textContent = 'タップして動画を再開';
+        startButton.style.display = 'block';
+        setStatus('動画が停止しています。再生ボタンを押してください', 'error');
+      }
+    });
+
+    videoEl.addEventListener('error', () => {
+      const code = videoEl.error ? videoEl.error.code : '不明';
+      console.error('MP4読み込みエラー:', code);
+
+      loadingEl.textContent = '動画の読み込みに失敗しました';
+      startButton.disabled = false;
+      startButton.textContent = '動画を再試行';
+      startButton.style.display = 'block';
+      setStatus('video.mp4の場所または動画形式を確認してください', 'error');
+    });
+
+    targetEntity.addEventListener('targetFound', () => {
+      hasSeenMarker = true;
+      isMarkerVisible = true;
+      showVideoIfReady();
+
+      if (hasPlayed && !videoEl.paused) {
+        setStatus('マーカー認識成功。動画を表示しています', 'success');
+      } else {
+        setStatus('マーカー認識成功。下のボタンを押して動画を開始してください', 'success');
+      }
+    });
+
+    targetEntity.addEventListener('targetLost', () => {
+      isMarkerVisible = false;
+
+      // ここでは動画を停止・非表示にしない。画面中央の位置を保つ。
+      if (hasPlayed && !videoEl.paused) {
+        setStatus('マーカーを見失いましたが、動画は画面に表示されています', 'success');
+      } else if (!hasSeenMarker) {
+        setStatus('マーカーを検索中...');
+      }
+    });
+
+    // 2本指のピンチ操作で動画を拡大縮小する
+    let pinchStartDistance = 0;
+    let pinchStartScale = 1;
+
+    window.addEventListener('touchstart', (event) => {
+      const target = event.target;
+      if (target && target.closest && target.closest('#startButton')) return;
+
+      if (event.touches.length === 2 && hasSeenMarker) {
+        pinchStartDistance = Math.hypot(
+          event.touches[0].clientX - event.touches[1].clientX,
+          event.touches[0].clientY - event.touches[1].clientY
+        );
+
+        const scale = videoPlane.getAttribute('scale');
+        pinchStartScale = scale ? scale.x : 1;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (event) => {
+      if (event.touches.length !== 2 || pinchStartDistance <= 0 || !hasSeenMarker) return;
+
+      const currentDistance = Math.hypot(
+        event.touches[0].clientX - event.touches[1].clientX,
+        event.touches[0].clientY - event.touches[1].clientY
+      );
+
+      const factor = currentDistance / pinchStartDistance;
+      const newScale = Math.max(0.8, Math.min(1.35, pinchStartScale * factor));
+      videoPlane.setAttribute('scale', `${newScale} ${newScale} 1`);
+    }, { passive: true });
+
+    window.addEventListener('touchend', (event) => {
+      if (event.touches.length < 2) {
+        pinchStartDistance = 0;
+      }
+    }, { passive: true });
+  </script>
+</body>
+</html>
